@@ -9,6 +9,7 @@
 # Python and web server setup
 # TODO: Optionally include user-provided python/nginx stacks instead
 include:
+  - wsgi_still.packages
   - wsgi_still.python
   - wsgi_still.nginx
 

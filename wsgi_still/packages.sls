@@ -5,7 +5,4 @@
 global_pkgs:
   pkg.installed:
     - pkgs:
-      - exuberant-ctags   # Parsing code in Vim
       - git               # Version control
-      - mosh              # Persistent ssh sessions
-      - screen            # Terminal window management
