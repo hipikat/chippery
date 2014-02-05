@@ -4,16 +4,17 @@
 ### Django projects
 ### Basic stack: Nginx + uWSGI + Virtualenv + Supervisord
 
-{% if pillar.get('django_projects') %}
+{% if pillar.get('wsgi_mash') %}
 
 # Python and web server setup
+# TODO: Optionally include user-provided python/nginx stacks instead
 include:
-  - python
-  - nginx
+  - wsgi_still.python
+  - wsgi_still.nginx
 
 /etc/nginx/uwsgi_params:
   file.managed:
-    - source: salt://projects/templates/uwsgi_params
+    - source: salt://wsgi_still/templates/uwsgi_params
     - mode: 444
 
 # TODO: Let projects specify system package requirements.
@@ -38,15 +39,13 @@ include:
 
 
 ### The projects
-{% for deploy_name, project in pillar.get('django_projects', {}).items() %}
+{% for deploy_name, project in pillar.get('wsgi_mash', {}).items() %}
 
 # Source (git) checkout
 {{ deploy_name }}-checkout:
   git.latest:
     - name: {{ project.git_url }}
-    {% if 'rev' in project %}
-    - rev: {{ project['rev'] }}
-    {% endif %} 
+    - rev: {{ project.get('rev', 'master') }}
     - target: /opt/proj/{{ deploy_name }}
 
 /opt/proj/{{ deploy_name }}:
@@ -240,4 +239,4 @@ run-{{ deploy_name }}-uwsgi:
 
 {% endif %}   # End if 'wsgi_module' in project
 
-{% endfor %}  # End for deploy_name, project in django_projects
+{% endfor %}  # End for deploy_name, project in wsgi_mash
