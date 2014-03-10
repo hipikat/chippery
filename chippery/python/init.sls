@@ -4,6 +4,7 @@
 
 {% set chippery = pillar['chippery'] %}
 
+
 # System-Python package manager
 chp|system_python_pip:
   pkg.installed:

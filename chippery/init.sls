@@ -5,6 +5,7 @@
 
 {% set chippery = pillar['chippery'] %}
 
+
 # Required system packages
 chippery_sys_pkgs:
   pkg.installed:
