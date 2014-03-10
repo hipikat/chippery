@@ -1,33 +1,39 @@
+#
 # Python setup with system-wide pyenv, virtualenv, virtualenvwrapper, etc.
 ##########################################################################
 
-# Install pip for system-Python.
-python-pip:
-  pkg.installed
+{% set chippery = pillar['chippery'] %}
 
-# Install system-Python packages
-{% for system_python_pkg in (
-  'flake8',
+# System-Python package manager
+chp|system_python_pip:
+  pkg.installed:
+    - name: python-pip
+
+# System-Python packages
+{% for py_pkg in (
   'virtualenv',
   'virtualenvwrapper',
-  'yolk',
 ) %}
-{{ system_python_pkg }}:
+chp|system_python_{{ py_pkg }}:
   pip.installed:
+    - name: {{ py_pkg }}
     - require:
-      - pkg: python-pip
+      - pkg: chp|system_python_pip
 {% endfor %}
 
 # Virtualenv and virtualenvwrapper.
-# Users should `source /etc/profile.d/virtualenvwrapper.sh`.
-{% for venv_dir in ('venv', 'proj') %}
-/opt/{{ venv_dir }}:
+{% set venv_path = chippery.get('virtualenv_path', '/opt/venv') %}
+{% set proj_path = chippery.get('project_path', '/opt/proj') %}
+
+{% for path in (venv_path, proj_path) %}
+{{ path }}:
   file.directory:
     - user: root
     - group: root
     - mode: 775
 {% endfor %}
 
+# Users' ~/.profile files should `source /etc/profile.d/virtualenvwrapper.sh`.
 /etc/profile.d/virtualenvwrapper.sh:
   file:
     - managed
@@ -35,6 +41,9 @@ python-pip:
     - user: root
     - group: root
     - mode: 444 
-    - source: salt://python/init_virtualenvwrapper.sh
+    - source: salt://chippery/python/templates/init_virtualenvwrapper.sh
+    - context:
+        venv_path: {{ venv_path }}
+        proj_path: {{ proj_path }}
     - require:
-      - pip.installed: virtualenvwrapper
+      - pip: chp|system_python_virtualenvwrapper
