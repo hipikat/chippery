@@ -1,0 +1,15 @@
+# /etc/chippery: Set system-wide environment variables that need to be
+# present for login, non-login, interactive AND non-interactive shells.
+# Chippery ensures this file is sourced from the /etc/profile as well as
+# the ~/.bashrc files of all sysadmins and relevant project users.
+
+echo "Running /etc/chippery"
+
+if [ -d /etc/chippery.d ]; then
+  for i in /etc/chippery.d/*.sh; do
+    if [ -r $i ]; then
+      . $i
+    fi
+  done
+  unset i
+fi

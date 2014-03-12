@@ -1,24 +1,16 @@
 #
 # Chippery entry-point - includes global states and formulas
 # for whatever kinds of projects are defined in the pillar.
-##########################################################
+#######################################################################
 
 {% set chippery = pillar['chippery'] %}
 
 
-# Required system packages
-chippery_sys_pkgs:
-  pkg.installed:
-    - pkgs:
-      - git               # Version control
-
-# Project stacks!
-{% if 'wsgi_projects' in chippery or 'php_projects' in chippery %}
+# Include core requirements and project stacks
 include:
-  {% if 'wsgi_projects' in chippery %}
-  - .wsgi_stack
+  -  .core
+  {% for stack_type in ('wsgi', 'php') %}
+  {% if stack_type ~ '_projects' in chippery %}
+  - .{{ stack_type }}_stack
   {% endif %}
-  {% if 'php_projects' in chippery %}
-  - .php_stack
-  {% endif %}
-{% endif %}
+  {% endfor %}
