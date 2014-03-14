@@ -88,10 +88,18 @@ chp|project={{ deploy_name }}:
       - group
 
 
+# Python executable
+pyenv install {{ project['python_version'] }}:
+  cmd.run:
+    - unless: test -e /usr/local/pyenv/versions/{{ project['python_version'] }}
+    # The 'creates' argument becomes available in Salt 2014.1.0...
+    #- creates: /usr/local/pyenv/versions/{{ project['python_version'] }}
+
+
 # Project virtual environment
 {{ venv_path }}/{{ deploy_name }}:
-  virtualenv:
-    - managed
+  virtualenv.managed:
+    - python: /usr/local/pyenv/versions/{{ project['python_version'] }}/bin/python
     {% if 'python_requirements' in project %}
     - requirements: {{ proj_path }}/{{ deploy_name }}/{{ project.python_requirements }}
     {% endif %}
@@ -131,6 +139,19 @@ chp|project={{ deploy_name }}|db=postgresql:
 {% endfor %}
 {% endif %}
 
+
+# Python paths
+{% if 'pythonpaths' in project %}
+# TODO: This currently just assumes python2.7. Fix it.
+{{ venv_path }}/{{ deploy_name }}/lib/python2.7/site-packages/_django_project_paths.pth:
+  file.managed:
+    - source: salt://projects/templates/pythonpath_config.pth
+    - mode: 444
+    - template: jinja
+    - context:
+        base_dir: {{ proj_path }}/{{ deploy_name }}
+        paths: {{ project['pythonpaths'] }}
+{% endif %}
 
 
 

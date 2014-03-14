@@ -1,19 +1,6 @@
 
 
 
-# Python paths
-{% if 'pythonpaths' in project %}
-# TODO: This currently just assumes python2.7. Fix it.
-{{ venv_path }}/{{ deploy_name }}/lib/python2.7/site-packages/_django_project_paths.pth:
-  file.managed:
-    - source: salt://projects/templates/pythonpath_config.pth
-    - mode: 444
-    - template: jinja
-    - context:
-        base_dir: {{ proj_path }}/{{ deploy_name }}
-        paths: {{ project['pythonpaths'] }}
-{% endif %}
-
 
 # Additional libraries required by the project, sourced via git
 {% if 'libdir' in project and 'libs' in project: %}

@@ -1,0 +1,11 @@
+--- login.defs	2014-03-14 10:42:32.625886999 +0800
++++ login.defs.mod	2014-03-14 10:42:26.361886999 +0800
+@@ -148,7 +148,7 @@
+ #
+ ERASECHAR	0177
+ KILLCHAR	025
+-UMASK		022
++UMASK		002
+ 
+ #
+ # Password aging controls:

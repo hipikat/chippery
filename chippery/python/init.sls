@@ -43,22 +43,53 @@ chp|system_python_{{ py_pkg }}:
     - user: root
     - group: root
     - mode: 775
+    - makedirs: True
 {% endfor %}
+
+
+# Use virtualenvwrapper as a tool for system-wide shared environments…
+/usr/local/bin/virtualenvwrapper.sh:
+  file.blockreplace:
+    - content: |
+        export WORKON_HOME={{ venv_path }}
+        export VIRTUALENVWRAPPER_HOOK_DIR=/usr/local/virtualenvwrapper/hooks
+        export PROJECT_HOME={{ proj_path }}
+    - prepend_if_not_found: True
+    - backup: False
+
 
 # Users' ~/.profile files should `source /etc/profile.d/virtualenvwrapper.sh`.
 # TODO: work out how to best arrange this whole insane shell startup mess.
-/etc/profile.d/virtualenvwrapper.sh:
-  file.managed:
+#/etc/profile.d/virtualenvwrapper.sh:
+# TODO: Get rid of the above comments if the -shared system seems to work...
+
+/usr/local/virtualenvwrapper/hooks:
+  file.directory:
     - user: root
     - group: root
-    - mode: 444 
-    - source: salt://chippery/python/templates/virtualenvwrapper-init.sh
-    - template: jinja
-    - context:
-        venv_path: {{ venv_path }}
-        proj_path: {{ proj_path }}
-    - require:
-      - pip: chp|system_python_virtualenvwrapper
+    - mode: 775
+    - makedirs: True
+
+#/usr/local/bin/virtualenvwrapper-shared.sh:
+#  file.managed:
+#    - user: root
+#    - group: root
+#    - mode: 555 
+#    - source: salt://chippery/python/templates/virtualenvwrapper-shared.sh
+#    - template: jinja
+#    - context:
+#        venv_path: {{ venv_path }}
+#        proj_path: {{ proj_path }}
+#    - require:
+#      - pip: chp|system_python_virtualenvwrapper
+
+
+
+# Create the Virtualenvwrapper hooks if they have not yet been created
+source /usr/local/bin/virtualenvwrapper.sh:
+  cmd.run:
+    - watch:
+      - file: /usr/local/bin/virtualenvwrapper.sh
 
 #/etc/chippery.d/virtualenvwrapper.sh:
 #  file.managed:
@@ -106,6 +137,7 @@ https://github.com/yyuu/pyenv.git:
 #    - mode: 444
 #    - source: salt://chippery/python/templates/pyenv-env.sh
 
+# Initialise shims and versions directories
 eval "$(pyenv init -)":
   cmd.run:
     - env:
