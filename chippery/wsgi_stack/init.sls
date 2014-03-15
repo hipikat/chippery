@@ -12,11 +12,24 @@
 {% set proj_path = chippery.get('project_path', '/opt/proj') %}
 
 
-# System Python and web server setup
+# Gather implicit core-system includes
+{% for deploy_name, project in chippery['wsgi_projects'].items() %}
+{% for db_name, db_info in project.get('databases', {}).items() %}
+
+{% if db_info.get('type') == 'postgres' %}
+  {% set include__postgres = true %}
+{% endif %}
+
+{% endfor %}
+{% endfor %}
+
 include:
+  # System-Python and web server setup
   - chippery.python
   - chippery.nginx
-
+  {% if include__postgres is defined %}
+  - chippery.postgres
+  {% endif %}
 
 # Include system packages used by the WSGI stack.
 # The lib[ssl|pcre3]-dev packages are for uWSGI routing support,
@@ -58,14 +71,14 @@ chp|project={{ deploy_name }}|include=pillow:
       - python-setuptools
 {% endif %}
 
-{% if 'postgresql' in includes %}
-chp|project={{ deploy_name }}|include=postgresql:
-  pkg.installed:
-    - pkgs:
-      - postgresql-9.1
-      - python-psycopg2
-      - libpq-dev
-{% endif %}
+#{% if 'postgresql' in includes %}
+#chp|project={{ deploy_name }}|include=postgresql:
+#  pkg.installed:
+#    - pkgs:
+#      - postgresql-9.1
+#      - python-psycopg2
+#      - libpq-dev
+#{% endif %}
 
 {% endif %}   # End 'include' in project
 
@@ -155,23 +168,27 @@ chp|project={{ deploy_name }}|virtualenvwrapper:
 
 
 # Databases and database users
-{% if 'postgresql' in project.get('include', []) %}
+{% for db_name, db_info in project.get('databases', {}).iteritems() %}
 
-chp|project={{ deploy_name }}|db=postgresql:
-{% for db_obj in ('database', 'user'): %}
-  postgres_{{ db_obj }}.present:
-    - name: {{ deploy_name }}
+{% if db_info.get('type') == 'postgres' %}
+
+{% set db_user = db_info.get('owner', db_name) %}
+chp|project={{ deploy_name }}|db_user={{ db_user }}:
+  postgres_user.present:
+    - name: {{ db_user }}
     - require:
-      - pkg: chp|project={{ deploy_name }}|include=postgresql
-{% endfor %}
+      - pkg: chp|init=postgres
 
-{% for db_admin_user in project.get('admins', []) %}
-chp|project={{ deploy_name }}|db_admin_user={{ db_admin_user }}:
-  postgres_user:
-    - name: {{ db_admin_user }}
-{% endfor %}
+chp|project={{ deploy_name }}|db={{ db_name }}:
+  postgres_database.present:
+    - name: {{ db_name }}
+    - owner: {{ db_user }}
+    - require:
+      - postgres_user: chp|project={{ deploy_name }}|db_user={{ db_user }}
 
-{% endif %}   # End if 'postgresql' in project['include']
+{% endif %}   # End if db_info['type'] == 'postgres'
+
+{% endfor %}  # End for db_name, db_info in project['databases']
 
 
 # Envdir (flat files whose names/contents form environment keys/values)
