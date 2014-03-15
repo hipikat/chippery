@@ -4,7 +4,8 @@
 
 {% set chippery = pillar['chippery'] %}
 
-# TODO: Allow configurable installation from source; steal from nginx-formula.
+
+# System package for Nginx
 chp|install_nginx:
   pkg.installed:
     - name: nginx
@@ -48,8 +49,9 @@ chp|install_nginx:
 
 # We use the plain 'nginx' name to increase the chance of a conflict
 # in case any other states are planning to manage nginx. Higher-level
-# formulas (e.g. chippery.wsgi_stack or chippery.php_stack) should use
-# a watch_in statement on nginx.
+# formulas (e.g. `chippery.wsgi_stack` or `chippery.php_stack`) should
+# use a `watch_in` statement on nginx if they change anything that will
+# require a restart of the web server.
 nginx:
   service:
     - running
