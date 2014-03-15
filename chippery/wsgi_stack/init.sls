@@ -81,8 +81,8 @@ chp|project={{ deploy_name }}:
 
 {{ proj_path }}/{{ deploy_name }}:
   file.directory:
-    - user: www-data
-    - group: www-data
+    - user: {{ project.get('owner', 'root') }}
+    - group: {{ project.get('group', 'www-data') }}
     - recurse:
       - user
       - group
@@ -105,6 +105,14 @@ pyenv install {{ project['python_version'] }}:
     {% endif %}
     - require:
       - pip: chp|system_python_virtualenv
+  file.directory:
+    - user: {{ project.get('owner', 'root') }}
+    - group: {{ project.get('group', 'www-data') }}
+    - recurse:
+      - user
+      - group
+    - require:
+      - virtualenv: {{ venv_path }}/{{ deploy_name }}
 
 # Virtualenv-centric directories…
 # TODO: Make sure ownership and permissions are all good?
@@ -151,11 +159,16 @@ chp|project={{ deploy_name }}|virtualenvwrapper:
 
 chp|project={{ deploy_name }}|db=postgresql:
 {% for db_obj in ('database', 'user'): %}
-  postgres_{{ db_obj }}:
+  postgres_{{ db_obj }}.present:
     - name: {{ deploy_name }}
-    - present
     - require:
       - pkg: chp|project={{ deploy_name }}|include=postgresql
+{% endfor %}
+
+{% for db_admin_user in project.get('admins', []) %}
+chp|project={{ deploy_name }}|db_admin_user={{ db_admin_user }}:
+  postgres_user:
+    - name: {{ db_admin_user }}
 {% endfor %}
 
 {% endif %}   # End if 'postgresql' in project['include']
@@ -194,18 +207,52 @@ chp|project={{ deploy_name }}|db=postgresql:
     - makedirs: True
 
 {% if 'git_libs' in project %}
-{% for dest, repo_details in project['git_libs'].iteritems(): %}
+
+{% for dest, repo_details in project['git_libs'].iteritems() %}
+
+{% set lib_dir = proj_path ~ '/' ~ deploy_name ~ '/' ~ project['lib_dir'] ~ '/' ~ dest %}
 {% if repo_details is string %}
   {% set repo = { 'url': repo_details } %}
 {% else %}
   {% set repo = repo_details %}
 {% endif %}
+
 chp|project={{ deploy_name }}|git_lib={{ dest }}:
   git.latest:
     - name: {{ repo['url'] }}
-    - target: {{ proj_path }}/{{ deploy_name }}/{{ project['lib_dir'] }}/{{ dest }}
-{% endfor %}
+    - target: {{ lib_dir }}
+    {% if 'rev' in repo %}
+    - rev: {{ repo['rev'] }}
+    {% endif %}
+  file.directory:
+    - name: {{ lib_dir }}
+    - user: {{ project.get('owner', 'root') }}
+    - group: {{ project.get('group', 'www-data') }}
+    - recurse:
+      - user
+      - group
+    
+
+{% if 'pip-install' in repo and repo['pip-install'] %}
+{% if repo['pip-install'] is mapping %}
+  {% set pip_args = repo['pip-install'] %}
+{% else %}
+  {% set pip_args = {} %}
 {% endif %}
+
+chp|project={{ deploy_name }}|git_lib={{ dest }}|state=pip:
+  pip.installed:
+    - name: {{ lib_dir }}
+    - bin_env: {{ venv_path }}/{{ deploy_name }}
+    {% if 'editable' in pip_args %}
+    - editable: file://{{ lib_dir }}
+    {% endif %}
+
+{% endif %}   # End if 'pip-install' in repo and repo['pip-install']
+
+{% endfor %}  # End for dest, repo_details in project['git_libs']
+
+{% endif %}   # End if 'git_libs' in project
 
 {% endif %}   # End if 'lib_dir' in project
 
