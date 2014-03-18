@@ -17,7 +17,7 @@
 {% for db_name, db_info in project.get('databases', {}).items() %}
 
 {% if db_info.get('type') == 'postgres' %}
-  {% set include__postgres = true %}
+  {% set include_postgres = true %}
 {% endif %}
 
 {% endfor %}
@@ -27,7 +27,7 @@ include:
   # System-Python and web server setup
   - chippery.python
   - chippery.nginx
-  {% if include__postgres is defined %}
+  {% if include_postgres is defined %}
   - chippery.postgres
   {% endif %}
 
@@ -58,6 +58,14 @@ chp|wsgi|system_packages:
 ### The projects
 {% for deploy_name, project in chippery['wsgi_projects'].items() %}
 
+{% if 'system_packages' in project %}
+chp|project={{ deploy_name }}|sys_pkgs:
+  pkg.installed:
+    - pkgs:
+      {% for pkg in project['system_packages'] %}
+      - {{ pkg }}
+      {% endfor %}
+{% endif %}
 
 # Functional modules listed in a project's 'include' list
 {% if 'include' in project %}
@@ -70,15 +78,6 @@ chp|project={{ deploy_name }}|include=pillow:
       - python-dev
       - python-setuptools
 {% endif %}
-
-#{% if 'postgresql' in includes %}
-#chp|project={{ deploy_name }}|include=postgresql:
-#  pkg.installed:
-#    - pkgs:
-#      - postgresql-9.1
-#      - python-psycopg2
-#      - libpq-dev
-#{% endif %}
 
 {% endif %}   # End 'include' in project
 
@@ -176,6 +175,11 @@ chp|project={{ deploy_name }}|virtualenvwrapper:
 chp|project={{ deploy_name }}|db_user={{ db_user }}:
   postgres_user.present:
     - name: {{ db_user }}
+    # TODO: Get this from the pillar :)
+    - password: 'insecure'
+    {% if db_user in chippery.get('sysadmins', []) %}
+    - createdb: true
+    {% endif %}
     - require:
       - pkg: chp|init=postgres
 
@@ -277,14 +281,16 @@ chp|project={{ deploy_name }}|git_lib={{ dest }}|state=pip:
 # Post-install hooks
 {% if 'post_install' in project %}
 {% for hook_name, hook in project['post_install'].iteritems(): %}
-{% set cwd = proj_path ~ '/'  ~ deploy_name %}
+
+{% set cwd = proj_path ~ '/' ~ deploy_name %}
+{% set venv = venv_path ~ '/' ~ deploy_name %}
 
 chp|project={{ deploy_name }}|post_install={{ hook_name }}:
   cmd.run:
-    - name: {{ hook['run'] }}
+    - name: {{ hook['run']|replace('%cwd%', cwd)|replace('%venv%', venv) }}
     - cwd: {{ cwd }}
     {% if 'onlyif' in hook %}
-    - onlyif: {{ hook['onlyif']|replace('%cwd%', cwd) }}
+    - onlyif: {{ hook['onlyif']|replace('%cwd%', cwd)|replace('%venv%', venv) }}
     {% endif %}
     {% if 'user' in hook %}
     - user: {{ hook['user'] }}
@@ -361,8 +367,11 @@ chp|project={{ deploy_name }}|state=supervisor:
         servers: {{ project['servers'] }}
         http_basic_auth: {{ project.get('http_basic_auth', false) }}
 
-{% if project.get('site_enabled', true) %}
+# Nginx running-state and state of the project config in Nginx's sites-enabled/
 chp|project={{ deploy_name }}|state=nginx:
+{% if project.get('site_enabled') or project.get('wsgi_enabled', true) %}
+# If site_enabled is explicitly true or wsgi_enabled isn't false, ensure that
+# Nginx is running and the site's config is linked into sites-enabled/.
   service.running:
     - name: nginx
     - reload: True
@@ -371,6 +380,11 @@ chp|project={{ deploy_name }}|state=nginx:
   file.symlink:
     - name: /etc/nginx/sites-enabled/{{ deploy_name }}.conf
     - target: /etc/nginx/sites-available/{{ deploy_name }}.conf
+{% elif not project.get('site_enabled', true) %}
+# Otherwise, if site_enabled is explicitly false, ensure that the site's
+# config file is NOT linked into sites-enabled/ (and don't bother Nginx).
+  file.absent:
+    - name: /etc/nginx/sites-enabled/{{ deploy_name }}.conf
 {% endif %}
 
 # Nginx-level HTTP Basic Authentication
