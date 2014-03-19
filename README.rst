@@ -2,16 +2,14 @@
 Chippery
 ########
 
-*"Deployment for* developers*"*
-
 **NB: This project is 'pre-alpha'. :)**
 
-*Short version:* Chippery makes the deployment and configuration of
+**Short version:** Chippery makes the deployment and configuration of
 WSGI_ web apps a breeze, for production and development.
 
 .. _WSGI: http://en.wikipedia.org/wiki/Web_Server_Gateway_Interface
 
-*Long version*: Deployment of modern web stacks just `isn't as easy as it
+**Long version**: Deployment of modern web stacks just `isn't as easy as it
 used to be`_. Chippery is a componentised set of Salt_ formulas, capable
 of setting up the WSGI-based web stack you need to serve sites in
 production - or development configurations as close to production as
@@ -22,7 +20,7 @@ you'd like.
 
 For simple web projects you probably won't have to touch a single
 configuration file. Given a fresh VM and a small project definition,
-Chippery can
+Chippery can:
 
 - Set up Pyenv_, so your projects can use any Python version
 - Install Virtualenv_ and Virtualenvwrapper_
@@ -64,20 +62,28 @@ Chippery can
 How it works
 ************
 
-It's just Salt. Chippery uses the default YAML/Jinja2 renderer.
+It's a regular Salt formula, using the default YAML/Jinja2 renderer.
 
-1. Create fat Jinja2 macros to define projects
-2. Create your pillar's 'chippery' dictionary
-3. Include the Chippery formula on targeted minions
+With Salt installed, all you have to do is:
+
+1. `Create a Jinja2 macro to define a project`_
+2. `Set up your pillar's 'chippery' dictionary`_
+3. `Include the formula on targeted minions`_
+
+.. _Create a Jinja2 macro to define a project:
 
 Projects: Fat Jinja2 Macros
 ===========================
 
-Deployment: pillar['chippery']
-==============================
+.. _Set up your pillar's 'chippery' dictionary:
 
-The Chippery formula
-====================
+Deployments: Pillar stacks
+==========================
+
+.. _Include the formula on targeted minions:
+
+Activation: The Chippery formula
+================================
 
 
 **************
