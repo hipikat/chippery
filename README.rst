@@ -4,23 +4,23 @@ Chippery
 
 **NB: This project is 'pre-alpha'. :)**
 
-**Short version:** Chippery makes the deployment and configuration of
-WSGI_ web apps a breeze, for production and development.
+**Short version:** Chippery makes the configuration and deployment of
+WSGI_ web applications a breeze, for production and development.
 
 .. _WSGI: http://en.wikipedia.org/wiki/Web_Server_Gateway_Interface
 
 **Long version**: Deployment of modern web stacks just `isn't as easy as it
 used to be`_. Chippery is a componentised set of Salt_ formulas, capable
 of setting up the WSGI-based web stack you need to serve sites in
-production - or development configurations as close to production as
+production, or in development configurations as close to production as
 you'd like.
 
 .. _isn't as easy as it used to be: https://twitter.com/pypikat/status/433788221449707520
 .. _Salt: http://www.saltstack.com
 
 For simple web projects you probably won't have to touch a single
-configuration file. Given a fresh VM and a small project definition,
-Chippery can:
+service configuration file. Given a fresh VM and a small project
+definition, Chippery can:
 
 - Set up Pyenv_, so your projects can use any Python version
 - Install Virtualenv_ and Virtualenvwrapper_
@@ -66,11 +66,9 @@ It's a regular Salt formula, using the default YAML/Jinja2 renderer.
 
 With Salt installed, all you have to do is:
 
-1. `Create a Jinja2 macro to define a project`_
-2. `Set up your pillar's 'chippery' dictionary`_
-3. `Include the formula on targeted minions`_
-
-.. _Create a Jinja2 macro to define a project:
+1. `Create a Jinja2 macro to define a project <#projects-fat-jinja2-macros>`__
+2. `Set up your pillar's 'chippery' dictionary <#deployments-pillar-stacks>`__
+3. `Include the formula on targeted minions <#activation-the-chippery-formula>`_
 
 Projects: Fat Jinja2 Macros
 ===========================
