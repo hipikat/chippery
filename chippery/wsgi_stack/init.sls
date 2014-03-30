@@ -8,12 +8,11 @@
 ### Basic stack: Nginx + uWSGI + Virtualenv + Supervisord
 
 {% set chippery = pillar['chippery'] %}
-{% set venv_path = chippery.get('virtualenv_path', '/opt/venv') %}
-{% set proj_path = chippery.get('project_path', '/opt/proj') %}
 
 
-# Gather implicit core-system includes
+### Implicit core-system includes
 {% for deploy_name, project in chippery['wsgi_projects'].items() %}
+
 {% for db_name, db_info in project.get('databases', {}).items() %}
 
 {% if db_info.get('type') == 'postgres' %}
@@ -58,6 +57,12 @@ chp|wsgi|system_packages:
 ### The projects
 {% for deploy_name, project in chippery['wsgi_projects'].items() %}
 
+{% set venv_path = chippery.get('virtualenv_path', '/opt/venv') ~ '/' ~ deploy_name %}
+{% set proj_path = chippery.get('project_path', '/opt/proj') ~ '/' ~ deploy_name %}
+{% set proj_owner = project.get('owner', 'root') %}
+{% set proj_group = project.get('group', 'www-data') %}
+
+
 {% if 'system_packages' in project %}
 chp|project={{ deploy_name }}|sys_pkgs:
   pkg.installed:
@@ -86,65 +91,80 @@ chp|project={{ deploy_name }}|include=pillow:
 chp|project={{ deploy_name }}:
   git.latest:
     - name: {{ project.git_url }}
-    - target: {{ proj_path }}/{{ deploy_name }}
+    - target: {{ proj_path }}
     {% if 'git_rev' in project %}
     - rev: {{ project['git_rev'] }}
     {% endif %}
 
-{{ proj_path }}/{{ deploy_name }}:
+{{ proj_path }}:
   file.directory:
-    - user: {{ project.get('owner', 'root') }}
-    - group: {{ project.get('group', 'www-data') }}
+    - user: {{ proj_owner }}
+    - group: {{ proj_group }}
     - recurse:
       - user
       - group
 
 
 # Python executable
-pyenv install {{ project['python_version'] }}:
+{% set py_version = project.get('python_version', 'system') %}
+chp|project={{ deploy_name }}|pyenv install {{ py_version }}:
   cmd.run:
+    - name: pyenv install {{ py_version }}
     - unless: test -e /usr/local/pyenv/versions/{{ project['python_version'] }}
     # The 'creates' argument becomes available in Salt 2014.1.0…
     #- creates: /usr/local/pyenv/versions/{{ project['python_version'] }}
 
 
 # Project virtual environment
-{{ venv_path }}/{{ deploy_name }}:
+#
+# NB: We install the virtualenv without requirements, then install libraries,
+# then install from a requirements file if one is given. If we were to use the
+# `requirements` argument to `virtualenv.managed`, dependancies may be
+# automatically installed when they should actually be satisfied by libraries.
+{{ venv_path }}:
   virtualenv.managed:
     - python: /usr/local/pyenv/versions/{{ project['python_version'] }}/bin/python
-    {% if 'python_requirements' in project %}
-    - requirements: {{ proj_path }}/{{ deploy_name }}/{{ project.python_requirements }}
-    {% endif %}
     - require:
       - pip: chp|system_python_virtualenv
   file.directory:
-    - user: {{ project.get('owner', 'root') }}
-    - group: {{ project.get('group', 'www-data') }}
+    - user: {{ proj_owner }}
+    - group: {{ proj_group }}
     - recurse:
       - user
       - group
     - require:
-      - virtualenv: {{ venv_path }}/{{ deploy_name }}
+      - virtualenv: {{ venv_path }}
 
 # Virtualenv-centric directories…
-# TODO: Make sure ownership and permissions are all good?
-{{ venv_path }}/{{ deploy_name }}/etc:
+# TODO: Make sure ownership and permissions are all good
+{{ venv_path }}/etc:
   file.directory:
     - mode: 755 
+    - user: {{ proj_owner }}
+    - group: {{ proj_group }}
 
 # Shortcut symlink to a virtualenv's site-packages directory
-chp|project={{ deploy_name }}|state=link_site-pkgs:
-  cmd.wait:
-    - name: ln -sf `{{ venv_path }}/{{ deploy_name }}/bin/python -c 'import distutils; print({# -#}
-      {#- #} distutils.sysconfig.get_python_lib())'` {{ venv_path }}/{{ deploy_name }}/site-pkgs
-    - watch:
-      - virtualenv: {{ venv_path }}/{{ deploy_name }}
+# Creates, for example, `/opt/venv/fooenv/site-pkgs`, which would link
+# to /opt/venv/fooenv/lib/python2.7/site-packages, adjusting for
+# whatever Python executable the virtualenv is created with.
+chp|project={{ deploy_name }}|state=ln -sf {{ venv_path }}/site-pkgs:
+  cmd.run:
+    - name: ln -sf `{{ venv_path }}/bin/python -c 'import distutils; print({# -#}
+      {#- #} distutils.sysconfig.get_python_lib())'` {{ venv_path }}/site-pkgs
+    - require:
+      - virtualenv: {{ venv_path }}
+    - onlyif: test ! -h {{ venv_path }}/site-pkgs
 
-{{ venv_path }}/{{ deploy_name }}/var/log:
+chp|project={{ deploy_name }}|file.exists={{ venv_path }}/site-pkgs:
+  file.exists:
+    - name: {{ venv_path }}/site-pkgs
+
+
+{{ venv_path }}/var/log:
   file.directory:
     - makedirs: True
 
-{{ venv_path }}/{{ deploy_name }}/var:
+{{ venv_path }}/var:
   file.directory:
     - user: www-data
     - mode: 770 
@@ -157,13 +177,13 @@ chp|project={{ deploy_name }}|state=link_site-pkgs:
 chp|project={{ deploy_name }}|virtualenvwrapper:
   pip.installed:
     - name: virtualenvwrapper
-    - bin_env: {{ venv_path }}/{{ deploy_name }}
+    - bin_env: {{ venv_path }}
 
 # Virtualenvwrapper association between project & virtualenv
-{{ venv_path }}/{{ deploy_name }}/.project:
+{{ venv_path }}/.project:
   file.managed:
     - mode: 444
-    - contents: {{ proj_path }}/{{ deploy_name }}
+    - contents: {{ proj_path }}
 
 
 # Databases and database users
@@ -197,8 +217,14 @@ chp|project={{ deploy_name }}|db={{ db_name }}:
 
 # Envdir (flat files whose names/contents form environment keys/values)
 {% if 'envdir' in project and 'env' in project: %}
+{{ proj_path }}/{{ project['envdir'] }}:
+  file.directory:
+    - mode: 755
+    - user: {{ proj_owner }}
+    - group: {{ proj_group }}
+
 {% for key, value in project['env'].iteritems(): %}
-{{ proj_path }}/{{ deploy_name }}/{{ project['envdir'] }}/{{ key }}:
+{{ proj_path }}/{{ project['envdir'] }}/{{ key }}:
   file.managed:
     - mode: 444
     - contents: {{ value }}
@@ -208,89 +234,106 @@ chp|project={{ deploy_name }}|db={{ db_name }}:
 
 # Python paths
 {% if 'python_paths' in project %}
-{{ venv_path }}/{{ deploy_name }}/site-pkgs/chippery_paths.pth:
+{{ venv_path }}/site-pkgs/chippery_paths.pth:
   file.managed:
     - source: salt://chippery/python/templates/pythonpath_config.pth
     - mode: 444
     - template: jinja
     - context:
-        base_dir: {{ proj_path }}/{{ deploy_name }}
+        base_dir: {{ proj_path }}
         paths: {{ project['python_paths'] }}
     - require:
-      - virtualenv: {{ venv_path }}/{{ deploy_name }}
+      - file: chp|project={{ deploy_name }}|file.exists={{ venv_path }}/site-pkgs
 {% endif %}
 
 
 # Additional libraries required by the project
-{% if 'lib_dir' in project %}
-{{ proj_path }}/{{ deploy_name }}/{{ project['lib_dir'] }}:
+{% if 'lib_root' in project %}
+{{ proj_path }}/{{ project['lib_root'] }}:
   file.directory:
     - makedirs: True
 
-{% if 'git_libs' in project %}
+{% if 'libs' in project %}
 
-{% for dest, repo_details in project['git_libs'].iteritems() %}
+{% set default_lib_type = project.get('default_lib_type', 'git') %}
 
-{% set lib_dir = proj_path ~ '/' ~ deploy_name ~ '/' ~ project['lib_dir'] ~ '/' ~ dest %}
-{% if repo_details is string %}
-  {% set repo = { 'url': repo_details } %}
-{% else %}
-  {% set repo = repo_details %}
+{% for lib_deploy_name, lib_details in project['libs'].iteritems() %}
+
+{% set lib_path = proj_path ~ '/' ~ project['lib_root'] ~ '/' ~ lib_deploy_name %}
+{% if lib_details is string %}
+  {% set lib_details = { 'url': lib_details } %}
 {% endif %}
 
-chp|project={{ deploy_name }}|git_lib={{ dest }}:
+# Clone this git library…
+{% if lib_details.get('type', default_lib_type) == 'git' %}
+
+chp|project={{ deploy_name }}|lib={{ lib_deploy_name }}:
   git.latest:
-    - name: {{ repo['url'] }}
-    - target: {{ lib_dir }}
-    {% if 'rev' in repo %}
-    - rev: {{ repo['rev'] }}
+    - name: {{ lib_details['url'] }}
+    - target: {{ lib_path }}
+    {% if 'rev' in lib_details %}
+    - rev: {{ lib_details['rev'] }}
     {% endif %}
   file.directory:
-    - name: {{ lib_dir }}
-    - user: {{ project.get('owner', 'root') }}
-    - group: {{ project.get('group', 'www-data') }}
+    - name: {{ lib_path }}
+    - user: {{ proj_owner }}
+    - group: {{ proj_group }}
     - recurse:
       - user
       - group
-    
 
-{% if 'pip-install' in repo and repo['pip-install'] %}
-{% if repo['pip-install'] is mapping %}
-  {% set pip_args = repo['pip-install'] %}
+{% endif %}   # End if lib_details.get('type', default_lib_type) == 'git'
+
+{% if 'pip-install' in lib_details and lib_details['pip-install'] %}
+{% if lib_details['pip-install'] is mapping %}
+  {% set pip_args = lib_details['pip-install'] %}
 {% else %}
   {% set pip_args = {} %}
 {% endif %}
 
-chp|project={{ deploy_name }}|git_lib={{ dest }}|state=pip:
+chp|project={{ deploy_name }}|lib={{ lib_deploy_name }}|state=pip:
   pip.installed:
-    - name: {{ lib_dir }}
-    - bin_env: {{ venv_path }}/{{ deploy_name }}
+    - name: {{ lib_deploy_name }}
+    - bin_env: {{ venv_path }}
     {% if 'editable' in pip_args %}
-    - editable: file://{{ lib_dir }}
+    - editable: file://{{ lib_path }}
     {% endif %}
 
-{% endif %}   # End if 'pip-install' in repo and repo['pip-install']
+{% endif %}   # End if 'pip-install' in lib_details and lib_details['pip-install']
 
-{% endfor %}  # End for dest, repo_details in project['git_libs']
+{% endfor %}  # End for lib_deploy_name, lib_details in project['libs'].iteritems()
 
-{% endif %}   # End if 'git_libs' in project
+{% endif %}   # End if 'libs' in project
 
 {% endif %}   # End if 'lib_dir' in project
+
+
+# Install virtualenv requirements, once all libs are installed
+{% if 'python_requirements' in project %}
+chp|project={{ deploy_name }}|state=pip_requirements:
+  pip.installed:
+    - bin_env: {{ venv_path }}
+    - requirements: {{ proj_path }}/{{ project['python_requirements'] }}
+    - require:
+      - virtualenv: {{ venv_path }}
+      {% for lib_deploy_name, lib_details in project.get('libs', []).iteritems() %}
+      {% if 'pip-install' in lib_details and lib_details['pip-install'] %}
+      - pip: chp|project={{ deploy_name }}|lib={{ lib_deploy_name }}|state=pip
+      {% endif %}
+      {% endfor %}
+{% endif %}
 
 
 # Post-install hooks
 {% if 'post_install' in project %}
 {% for hook_name, hook in project['post_install'].iteritems(): %}
 
-{% set cwd = proj_path ~ '/' ~ deploy_name %}
-{% set venv = venv_path ~ '/' ~ deploy_name %}
-
 chp|project={{ deploy_name }}|post_install={{ hook_name }}:
   cmd.run:
-    - name: {{ hook['run']|replace('%cwd%', cwd)|replace('%venv%', venv) }}
-    - cwd: {{ cwd }}
+    - name: {{ hook['run']|replace('%proj%', proj_path)|replace('%venv%', venv_path) }}
+    - cwd: {{ proj_path }}
     {% if 'onlyif' in hook %}
-    - onlyif: {{ hook['onlyif']|replace('%cwd%', cwd)|replace('%venv%', venv) }}
+    - onlyif: {{ hook['onlyif']|replace('%proj%', proj_path)|replace('%venv%', venv_path) }}
     {% endif %}
     {% if 'user' in hook %}
     - user: {{ hook['user'] }}
@@ -307,7 +350,7 @@ chp|project={{ deploy_name }}|post_install={{ hook_name }}:
 chp|project={{ deploy_name }}|pip=uwsgi:
   pip.installed:
     - name: uWSGI
-    - bin_env: {{ venv_path }}/{{ deploy_name }}/bin/pip
+    - bin_env: {{ venv_path }}/bin/pip
 
 # Supervisor uWSGI task
 /etc/supervisor/conf.d/{{ deploy_name }}.conf:
@@ -317,8 +360,8 @@ chp|project={{ deploy_name }}|pip=uwsgi:
     - template: jinja
     - context:
         program_name: {{ deploy_name }}
-        uwsgi_bin: {{ venv_path }}/{{ deploy_name }}/bin/uwsgi
-        uwsgi_ini: {{ venv_path }}/{{ deploy_name }}/etc/uwsgi.ini
+        uwsgi_bin: {{ venv_path }}/bin/uwsgi
+        uwsgi_ini: {{ venv_path }}/etc/uwsgi.ini
     - require:
       - pip: chp|project={{ deploy_name }}|pip=uwsgi
 
@@ -328,7 +371,7 @@ chp|project={{ deploy_name }}|update=supervisor:
     - watch:
       - file: /etc/supervisor/conf.d/{{ deploy_name }}.conf
 
-{{ venv_path }}/{{ deploy_name }}/etc/uwsgi.ini:
+{{ venv_path }}/etc/uwsgi.ini:
   file.managed:
     - source: salt://chippery/wsgi_stack/templates/uwsgi-master.ini
     - mode: 444
@@ -338,10 +381,10 @@ chp|project={{ deploy_name }}|update=supervisor:
         # TODO: Easier to do this at the Nginx level? Much of a muchness?
         #basicauth: {{ project.get('http_basic_auth', false) }}
         #realm: {{ deploy_name }}
-        #htpasswd_file: {{ venv_path }}/{{ deploy_name }}/etc/{{ deploy_name }}.htpasswd
-        socket: {{ venv_path }}/{{ deploy_name }}/var/uwsgi.sock
+        #htpasswd_file: {{ venv_path }}/etc/{{ deploy_name }}.htpasswd
+        socket: {{ venv_path }}/var/uwsgi.sock
         wsgi_module: {{ project['wsgi_module'] }}
-        virtualenv: {{ venv_path }}/{{ deploy_name }}
+        virtualenv: {{ venv_path }}
         uwsgi_log: /opt/var/{{ deploy_name }}/var/log/uwsgi.log
 
 # Enable/disable the Supervisord/uWSGI job
@@ -361,8 +404,8 @@ chp|project={{ deploy_name }}|state=supervisor:
     - template: jinja
     - context:
         project_name: {{ deploy_name }}
-        project_root: {{ proj_path }}/{{ deploy_name }}
-        upstream_server: unix://{{ proj_path }}/{{ deploy_name }}/var/uwsgi.sock
+        project_root: {{ proj_path }}
+        upstream_server: unix://{{ venv_path }}/var/uwsgi.sock
         port: {{ project['port'] }}
         servers: {{ project['servers'] }}
         http_basic_auth: {{ project.get('http_basic_auth', false) }}
@@ -394,13 +437,13 @@ chp|project={{ deploy_name }}|state=nginx:
 {% if pillar.get('users', {}).get(user, {}).get('htpasswd') %}
 chp|project={{ deploy_name }}|http_basic_auth={{ user }}:
   file.append:
-    - name: {{ venv_path }}/{{ deploy_name }}/etc/{{ deploy_name }}.htpasswd
+    - name: {{ venv_path }}/etc/{{ deploy_name }}.htpasswd
     - text: {{ user }}:{{ pillar['users'][user]['htpasswd'] }}
     - makedirs: true
 {% endif %}
 {% endfor %}
 
-{{ venv_path }}/{{ deploy_name }}/etc/{{ deploy_name }}.htpasswd:
+{{ venv_path }}/etc/{{ deploy_name }}.htpasswd:
   file.managed:
     - owner: www-data
     - mode: 400
