@@ -1,27 +1,16 @@
+#!stateconf -o yaml . jinja
 #
-# Requirements for all types of Chippery project stacks
+# Core Chippery states
 ########################################################################
 
 
-# Required system packages
-chippery_sys_pkgs:
-  pkg.installed:
-    - pkgs:
-      - git               # Version control
-
-#/etc/login.defs:
-#  file.patch:
-#    - source: salt://chippery/templates/login.defs.patch
-#    - hash: md5=75582eaf0722a1a0bb09427c14870280
-
-#/etc/login.defs:
-#  file.sed:
-#    - before: "UMASK\s*[\dx]\+\s*"
-#    - after: "UMASK\s*002\s*"
-
-/etc/login.defs:
-  file.replace:
-    - pattern: ^UMASK\s+[\dx]+
-    - repl: UMASK\t\t002
-    - flags: ['IGNORECASE']
-    - backup: False
+# Install template for a user shell environment setup script. This is just an
+# empty shell script which other parts of Chippery append to with blockreplace.
+.Install Chippery's shared environment loader script:
+  file.managed:
+    - name: /usr/local/bin/set_chippery_env.sh
+    - source: salt://chippery/templates/set_chippery_env.sh
+    - replace: False
+    - user: root
+    - group: root
+    - mode: 555
