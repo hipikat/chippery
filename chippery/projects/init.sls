@@ -13,9 +13,9 @@
 ####
 
 # Global Python settings
-{% set venv_user = settings.get('project_user', 'root') %}
-{% set venv_group = settings.get('project_group', venv_user) %}
-{% if venv_group == 'root' %}
+{% set project_user = settings.get('project_user', 'root') %}
+{% set project_group = settings.get('project_group', project_user) %}
+{% if project_group == 'root' %}
   {% set venv_dir_mode = '755' %}
 {% else %}
   {% set venv_dir_mode = '775' %}
@@ -23,52 +23,76 @@
 
 
 ####
+# Ensure the existence of required user groups
+####
+# Before 'includes' because Pyenv etc. get their group set to 'project_group'
+# TODO: Under 'Install projects', add groups for individual projects
+#
+# Think: SHOULD we create users and groups?? Shouldn't we?
+#
+#{% if project_user != 'root' %}
+#.Default project user '{{ project_user }}' for Chippery projects:
+#  user.present:
+#    - name: {{ settings['project_group'] }}
+#    - createhome: False
+#{% endif %}
+
+#{% if project_group != 'root' %}
+#.Default project group '{{ project_group }}' for Chippery projects:
+#  group.present:
+#    - name: {{ settings['project_group'] }}
+#{% endif %}
+
+
+####
 # System components
 ####
+# This is where Jinja2 really starts to show its weaknesses. This whole
+# thing would probably be much nicer if it was converted to Mako.
+{% set includes = {
+  'chippery.null': True,
+  'chippery.nginx': False,
+  'chippery.python.pyenv': False,
+  'chippery.python.virtualenv': False,
+} %}
 
-# Test for system components to include
-{% set include_virtualenv = False %}
-{% set include_pyenv = False %}
-{% for project in projects %}
+{% if settings.get('nginx', {}).get('managed', True) %}
+  {% if includes.update({'chippery.nginx': True}) %}{% endif %}
+{% endif %}
+
+{% for deploy_name, project in projects.iteritems() %}
 
   # Test for Virtualenv requirement
-  {% if 'python_src' or 'python_requirements' or 'python_libs' or 'python_packages' in project %}
-    {% set include_virtualenv = True %}
+  {% if 'python_src' in project or 'python_requirements' in project or
+        'python_libs' in project or 'python_packages' in project %}
+        {% if includes.update({'chippery.python.virtualenv': True}) %}{% endif %}
   {% endif %}
 
   # Test for non-system-Python requirement (which will install Pyenv)
-  {% if 'python_version' in project and project['python_version'] != 'system' %}
-    {% set include_pyenv = True %}
+  {% if project.get('python_version', 'system') != 'system' %}
+    {% if includes.update({'chippery.python.pyenv': True}) %}{% endif %}
   {% endif %}
 
 {% endfor %}
 
-
 # Include system components
 include:
-    - chippery.null
+      - chippery.null
+  {% for state, include in includes.items() %}
+    {% if include %}
+      - {{ state }}
+    {% endif %}
+  {% endfor %}
 
-  # Install, run and manage Nginx unless we're told not to
-  {% if settings.get('nginx', {}).get('managed', true) %}
-    - chippery.nginx
-  {% endif %}
-
-  # Include other system components with more complex tests (above)
-  {% if include_virtualenv %}
-    - chippery.python.virtualenv
-  {% endif %}
-  {% if include_pyenv %}
-    - chippery.python.pyenv
-  {% endif %}
 
 
 ####
 # Install projects
 ####
-{% for deploy_name, project in chippery['projects'].items() %}
+{% for deploy_name, project in projects.items() %}
 
   # Generic settings
-  {% set proj_path = settings.get('project_path', '/opt') ~ '/' ~ deploy_name %}
+  {% set project_path = settings.get('project_path', '/opt') ~ '/' ~ deploy_name %}
 
   # Python settings
   {% set venv_path = settings.get('virtualenv_path', '/opt/.virtualenvs') ~ '/' ~ deploy_name %}
@@ -76,6 +100,53 @@ include:
   {% if 'python_src' or 'python_requirements' or 'python_libs' or 'python_packages' in project %}
     {% set require_virtualenv = True %}
   {% endif %}
+
+
+  ####
+  # Project source code
+  ####
+  {% if 'source' in project %}
+    {% set source = project['source'] %}
+    {% if source is not mapping %}
+      {% set source = {'url': source} %}
+    {% endif %}
+
+    {% if 'deploy_key' in source %}
+.Deployment key for '{{ deploy_name }}':
+  file.managed:
+    - name: /var/local/{{ deploy_name }}/deploy_key
+    - source: {{ source['deploy_key'] }}
+    - user: {{ project_user }}
+    - group: {{ project_group }}
+    - mode: 600
+    - makedirs: True
+    {% endif %}
+
+.Ownership of /var/local/{{ deploy_name }} after creating deploy_key:
+  file.directory:
+    - name: /var/local/{{ deploy_name }}
+    - user: {{ project_user }}
+    - group: {{ project_group }}
+
+    {% if 'url' in source %}
+.Git-checkout source for project '{{ deploy_name }}':
+  git.latest:
+    - name: {{ project['source']['url'] }}
+      {% if 'rev' in source %}
+    - rev: {{ source['rev'] }}
+      {% endif %}
+    - target: {{ project_path }}
+    - runas: {{ project_user }}
+      {% if 'remote_name' in source %}
+    - remote_name: {{ source['remote_name'] }}
+      {% endif %}
+      {% if 'deploy_key' in source %}
+    - identity: /var/local/{{ deploy_name }}/deploy_key
+      {% endif %}
+    {% endif %}
+
+  {% endif %}
+
 
   ####
   # Python-based projects
@@ -92,13 +163,18 @@ include:
 
   {% if require_virtualenv %}
 
-    # Install a Python Virtualenv for the project
+  # Install a Python Virtualenv for the project
+  #
+  # Note: We install the virtualenv without requirements, then install libraries,
+  # then install from a requirements file if one is given. If we were to use the
+  # `requirements` argument to `virtualenv.managed`, dependancies may be
+  # automatically installed when they should actually be satisfied by libraries.
 .Virtualenv for {{ deploy_name }}:
   virtualenv.managed:
     - name: {{ venv_path }}
-    {% if python_version != 'system' %}
+      {% if python_version != 'system' %}
     - python: /usr/local/pyenv/versions/{{ python_version }}/bin/python
-    {% endif %}
+      {% endif %}
 
     # Install Python packages specified in the pillar
     {% for python_package in project.get('python_packages', []) %}
@@ -107,9 +183,30 @@ include:
     - name: {{ python_package }}
     - bin_env: {{ venv_path }}
     - use_wheel: True
-    {% endfor %}
+      {% endfor %}
+
+.Configuration directory for virtualenv '{{ deploy_name }}':
+  file.directory:
+    - name: {{ venv_path }}/etc
+    - user: {{ project_user }}
+    - group: {{ project_group }}
+    - mode: 775
+
+.Symlink to site-packages in virtualenv '{{ deploy_name }}':
+  cmd.run:
+    - name: ln -sf `{{ venv_path }}/bin/python -c 'import distutils; print({# -#}
+      {#- #} distutils.sysconfig.get_python_lib())'` {{ venv_path }}/site-packages
+    - creates: {{ venv_path }}/site-packages
+
+# TODO: permissions on directories created around here
+.Log directory in virtualenv '{{ deploy_name }}':
+  file.directory:
+    - name: {{ venv_path }}/var/log
+    - makedirs: True
 
   {% endif %}{# require_virtualenv #}
 
 
-{% endfor %}
+
+
+{% endfor %}{# deploy_name, project in projects #}

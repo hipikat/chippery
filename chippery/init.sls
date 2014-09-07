@@ -15,9 +15,9 @@ include:
   - .settings
 
   # Ensure the existence of defined virtual machines
-  {% if 'syndicates' in chippery.values() %}
-  - .syndicates
-  {% endif %}
+  #{% if 'minions' in chippery.values() %}
+  #- .cloud.ensure_minions
+  #{% endif %}
 
   # Install individual 'stacks', e.g. 'wsgi_dev'
   {% for stack in chippery.get('stacks', []) %}
