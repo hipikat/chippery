@@ -145,7 +145,7 @@ include:
       {% endif %}
     {% endif %}
 
-  {% endif %}
+  {% endif %}{# if 'source' in project #}
 
 
   ####
@@ -185,7 +185,7 @@ include:
     - use_wheel: True
       {% endfor %}
 
-.Configuration directory for virtualenv '{{ deploy_name }}':
+.Configuration (etc) directory for virtualenv '{{ deploy_name }}':
   file.directory:
     - name: {{ venv_path }}/etc
     - user: {{ project_user }}
@@ -198,15 +198,137 @@ include:
       {#- #} distutils.sysconfig.get_python_lib())'` {{ venv_path }}/site-packages
     - creates: {{ venv_path }}/site-packages
 
-# TODO: permissions on directories created around here
 .Log directory in virtualenv '{{ deploy_name }}':
   file.directory:
     - name: {{ venv_path }}/var/log
     - makedirs: True
 
-  {% endif %}{# require_virtualenv #}
+    # Virtualenvwrapper association between project & virtualenv
+    {% if 'source' in project %}
+.Associate '{{ deploy_name }}' source with its virtualenv:
+  file.managed:
+    - name: {{ venv_path }}/.project
+    - mode: 444
+    - contents: {{ project_path }}
+    {% endif %}
+
+    ####
+    # App server (a uWSGI process managed by Supervisor)
+    ####
+
+    {% if 'wsgi_module' in project: %}
+
+      # Virtualenv-local uWSGI install
+.uWSGI Python package in virtualenv for project '{{ deploy_name }}':
+  pip.installed:
+    - name: uWSGI
+    - bin_env: {{ venv_path }}/bin/pip
+
+      # Supervisor uWSGI task
+.Supervisor task for running uWSGI for project '{{ deploy_name }}':
+  file.managed:
+    - name: /etc/supervisor/conf.d/{{ deploy_name }}.conf:
+    - source: salt://chippery/templates/supervisor-uwsgi.conf
+    - mode: 444
+    - template: jinja
+    - context:
+        program_name: {{ deploy_name }}
+        uwsgi_bin: {{ venv_path }}/bin/uwsgi
+        uwsgi_ini: {{ venv_path }}/etc/uwsgi.ini
+
+.Update Supervisor process list; configuration for project '{{ deploy_name }}' changed:
+  module.wait:
+    - name: supervisord.update
+    - watch:
+      - file: /etc/supervisor/conf.d/{{ deploy_name }}.conf
+
+.uWSGI configuration file for project '{{ deploy_name }}':
+  file.managed:
+    - name: {{ venv_path }}/etc/uwsgi.ini:
+    - source: salt://chippery/wsgi_stack/templates/uwsgi-master.ini
+    - mode: 444
+    - makedirs: True
+    - template: jinja
+    - context:
+        # Easier to do basic auth at the Nginx level? Much of a muchness?
+        #basicauth: {{ project.get('http_basic_auth', false) }}
+        #realm: {{ deploy_name }}
+        #htpasswd_file: {{ venv_path }}/etc/{{ deploy_name }}.htpasswd
+        socket: {{ venv_path }}/var/uwsgi.sock
+        wsgi_module: {{ project['wsgi_module'] }}
+        virtualenv: {{ venv_path }}
+        uwsgi_log: /opt/var/{{ deploy_name }}/var/log/uwsgi.log
+
+    # Enable/disable the Supervisord/uWSGI job
+    {% set wsgi_enabled = project.get('wsgi_process', 'running') %}
+    {% if wsgi_enabled == 'running' %}
+
+.Ensure uWSGI process for project '{{ deploy_name }}' is running:
+  supervisord.running:
+    - name: {{ deploy_name }}
+
+    {% elif wsgi_enabled = False %}
+
+.Ensure uWSGI process for project '{{ deploy_name }}' is disabled:
+  supervisord.dead:
+    - name: {{ deploy_name }}
+
+    {% endif %}
 
 
+  ####
+  # Web server (Nginx)
+  ####
+
+.Nginx configuration for project '{{ deploy_name }}':
+  file.managed:
+    - name: /etc/nginx/sites-available/{{ deploy_name }}.conf
+    - source: salt://chippery/templates/nginx-uwsgi-proxy.conf
+    - mode: 444
+    - template: jinja
+    - context:
+        project_name: {{ deploy_name }}
+        project_root: {{ project_path }}
+        upstream_server: unix://{{ venv_path }}/var/uwsgi.sock
+        port: {{ project.get('port', 80) }}
+        servers: {{ project['servers'] }}
+        http_basic_auth: {{ project.get('http_basic_auth', False) }}
+
+
+  {% endif %}   # End if require_virtualenv
+
+
+
+  ####
+  # Databases
+  ####
+
+  {% for db_name, db_info in project.get('databases', {}).iteritems() %}
+
+    ### PostgreSQL
+    {% if db_info.get('type') == 'postgres' %}
+      {% set db_user = db_info.get('owner', db_name) %}
+
+.Database user '{{ db_user }}' for project '{{ deploy_name }}':
+  postgres_user.present:
+    - name: {{ db_user }}
+    - password: {{ db_info['password'] }}
+    {% if db_user in chippery.get('sysadmins', []) %}
+    - createdb: true
+    {% endif %}
+
+.Postgresql database '{{ db_name }}' for project '{{ deploy_name }}':
+  postgres_database.present:
+    - name: {{ db_name }}
+    - owner: {{ db_user }}
+
+    {% endif %}   # End if db_info.get('type') == 'postgres'
+  {% endfor %}    # End for db_name, db_info in project['databases']
+
+  ####
+  # Web server
+  ###
 
 
 {% endfor %}{# deploy_name, project in projects #}
+
