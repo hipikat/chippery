@@ -212,91 +212,7 @@ include:
     - contents: {{ project_path }}
     {% endif %}
 
-    ####
-    # App server (a uWSGI process managed by Supervisor)
-    ####
-
-    {% if 'wsgi_module' in project: %}
-
-      # Virtualenv-local uWSGI install
-.uWSGI Python package in virtualenv for project '{{ deploy_name }}':
-  pip.installed:
-    - name: uWSGI
-    - bin_env: {{ venv_path }}/bin/pip
-
-      # Supervisor uWSGI task
-.Supervisor task for running uWSGI for project '{{ deploy_name }}':
-  file.managed:
-    - name: /etc/supervisor/conf.d/{{ deploy_name }}.conf:
-    - source: salt://chippery/templates/supervisor-uwsgi.conf
-    - mode: 444
-    - template: jinja
-    - context:
-        program_name: {{ deploy_name }}
-        uwsgi_bin: {{ venv_path }}/bin/uwsgi
-        uwsgi_ini: {{ venv_path }}/etc/uwsgi.ini
-
-.Update Supervisor process list; configuration for project '{{ deploy_name }}' changed:
-  module.wait:
-    - name: supervisord.update
-    - watch:
-      - file: /etc/supervisor/conf.d/{{ deploy_name }}.conf
-
-.uWSGI configuration file for project '{{ deploy_name }}':
-  file.managed:
-    - name: {{ venv_path }}/etc/uwsgi.ini:
-    - source: salt://chippery/wsgi_stack/templates/uwsgi-master.ini
-    - mode: 444
-    - makedirs: True
-    - template: jinja
-    - context:
-        # Easier to do basic auth at the Nginx level? Much of a muchness?
-        #basicauth: {{ project.get('http_basic_auth', false) }}
-        #realm: {{ deploy_name }}
-        #htpasswd_file: {{ venv_path }}/etc/{{ deploy_name }}.htpasswd
-        socket: {{ venv_path }}/var/uwsgi.sock
-        wsgi_module: {{ project['wsgi_module'] }}
-        virtualenv: {{ venv_path }}
-        uwsgi_log: /opt/var/{{ deploy_name }}/var/log/uwsgi.log
-
-    # Enable/disable the Supervisord/uWSGI job
-    {% set wsgi_enabled = project.get('wsgi_process', 'running') %}
-    {% if wsgi_enabled == 'running' %}
-
-.Ensure uWSGI process for project '{{ deploy_name }}' is running:
-  supervisord.running:
-    - name: {{ deploy_name }}
-
-    {% elif wsgi_enabled = False %}
-
-.Ensure uWSGI process for project '{{ deploy_name }}' is disabled:
-  supervisord.dead:
-    - name: {{ deploy_name }}
-
-    {% endif %}
-
-
-  ####
-  # Web server (Nginx)
-  ####
-
-.Nginx configuration for project '{{ deploy_name }}':
-  file.managed:
-    - name: /etc/nginx/sites-available/{{ deploy_name }}.conf
-    - source: salt://chippery/templates/nginx-uwsgi-proxy.conf
-    - mode: 444
-    - template: jinja
-    - context:
-        project_name: {{ deploy_name }}
-        project_root: {{ project_path }}
-        upstream_server: unix://{{ venv_path }}/var/uwsgi.sock
-        port: {{ project.get('port', 80) }}
-        servers: {{ project['servers'] }}
-        http_basic_auth: {{ project.get('http_basic_auth', False) }}
-
-
-  {% endif %}   # End if require_virtualenv
-
+  {% endif %}     # End if require_virtualenv
 
 
   ####
@@ -325,9 +241,93 @@ include:
     {% endif %}   # End if db_info.get('type') == 'postgres'
   {% endfor %}    # End for db_name, db_info in project['databases']
 
+
   ####
-  # Web server
-  ###
+  # App server (a uWSGI process managed by Supervisor, for Python apps)
+  ####
+
+  {% if 'wsgi_module' in project: %}
+
+    # Virtualenv-local uWSGI install
+.uWSGI Python package in virtualenv for project '{{ deploy_name }}':
+  pip.installed:
+    - name: uWSGI
+    - bin_env: {{ venv_path }}/bin/pip
+
+    # Supervisor uWSGI task
+.Supervisor task for running uWSGI for project '{{ deploy_name }}':
+  file.managed:
+    - name: /etc/supervisor/conf.d/{{ deploy_name }}.conf
+    - source: salt://chippery/templates/supervisor-uwsgi.conf
+    - mode: 444
+    - template: jinja
+    - context:
+        program_name: {{ deploy_name }}
+        uwsgi_bin: {{ venv_path }}/bin/uwsgi
+        uwsgi_ini: {{ venv_path }}/etc/uwsgi.ini
+
+.Update Supervisor process list; configuration for project '{{ deploy_name }}' changed:
+  module.wait:
+    - name: supervisord.update
+    - watch:
+      - file: .Supervisor task for running uWSGI for project '{{ deploy_name }}'
+
+.uWSGI configuration file for project '{{ deploy_name }}':
+  file.managed:
+    - name: {{ venv_path }}/etc/uwsgi.ini
+    - source: salt://chippery/wsgi_stack/templates/uwsgi-master.ini
+    - mode: 444
+    - makedirs: True
+    - template: jinja
+    - context:
+        # Easier to do basic auth at the Nginx level? Much of a muchness?
+        #basicauth: {{ project.get('http_basic_auth', false) }}
+        #realm: {{ deploy_name }}
+        #htpasswd_file: {{ venv_path }}/etc/{{ deploy_name }}.htpasswd
+        socket: {{ venv_path }}/var/uwsgi.sock
+        wsgi_module: {{ project['wsgi_module'] }}
+        virtualenv: {{ venv_path }}
+        uwsgi_log: /opt/var/{{ deploy_name }}/var/log/uwsgi.log
+
+    # The WSGI app_state should be 'running' (default), 'dead' or 'ignore'.
+    {% set app_state = project.get('app_state', 'running') %}
+    {% if app_state == True %}
+      {% set app_state = 'running' %}
+    {% elif app_state == False %}
+      {% set app_state = 'dead' %}
+    {% endif %}
+
+    {% if app_state == 'running' or app_state == 'dead' %}
+.Ensure uWSGI process for project '{{ deploy_name }}' is {{ app_state }}:
+  supervisord.{{ app_state }}:
+    - name: {{ deploy_name }}
+    {% endif %}
+
+  {% endif %}   # End if 'wsgi_module' in project
+
+
+
+  ####
+  # Web server (Nginx) - with our uWSGI app server set as upstream
+  ####
+
+  {% if 'servers' in project %}
+.Nginx configuration for project '{{ deploy_name }}':
+  file.managed:
+    - name: /etc/nginx/sites-available/{{ deploy_name }}.conf
+    - source: salt://chippery/templates/nginx-uwsgi-proxy.conf
+    - mode: 444
+    - template: jinja
+    - context:
+        project_name: {{ deploy_name }}
+        project_root: {{ project_path }}
+        upstream_server: unix://{{ venv_path }}/var/uwsgi.sock
+        port: {{ project.get('port', 80) }}
+        servers: {{ project['servers'] }}
+        http_basic_auth: {{ project.get('http_basic_auth', False) }}
+  {% endif %}
+
+
 
 
 {% endfor %}{# deploy_name, project in projects #}
