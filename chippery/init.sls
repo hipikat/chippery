@@ -9,10 +9,10 @@
 include:
 
   # States common to any minion using Chippery
-  - .core
+  #- .core
 
   # Machine-wide settings
-  - .settings
+  #- .settings
 
   # Ensure the existence of defined virtual machines
   #{% if 'minions' in chippery.values() %}
@@ -28,9 +28,9 @@ include:
   {% endfor %}
 
   # Install (and remove) projects
-  {% if 'projects' in chippery %}
-  - .projects
-  {% endif %}
+  #{% if 'projects' in chippery %}
+  #- .projects
+  #{% endif %}
 
 
   #{% for project in chippery.get('projects', {}) %}
